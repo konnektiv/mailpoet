@@ -2,7 +2,11 @@ import { select, dispatch } from '@wordpress/data';
 import { MailPoet } from 'mailpoet';
 import { merge } from 'lodash';
 import Cookies from 'js-cookie';
-import { createBlock, unregisterBlockType } from '@wordpress/blocks';
+import {
+  BlockInstance,
+  createBlock,
+  unregisterBlockType,
+} from '@wordpress/blocks';
 import { callApi as CALL_API } from 'common/controls/call_api';
 import { SETTINGS_DEFAULTS } from '@wordpress/block-editor';
 import { blocksToFormBodyFactory } from './blocks_to_form_body.jsx';
@@ -10,7 +14,7 @@ import { formatCustomFieldBlockName } from '../blocks/format_custom_field_block_
 import { getCustomFieldBlockSettings } from '../blocks/custom_fields_blocks.jsx';
 import { registerCustomFieldBlock } from '../blocks/blocks.jsx';
 import { mapFormDataBeforeSaving } from './map_form_data_before_saving.jsx';
-import { findBlock } from './find_block.jsx';
+import { findBlock } from './find_block';
 
 const formatApiErrorMessage = (response) => {
   let errorMessage = null;
@@ -22,17 +26,23 @@ const formatApiErrorMessage = (response) => {
 };
 
 // Recursively apply callback on every block in blocks tree
-const mapBlocks = (blocks, callback) =>
+const mapBlocks = (
+  blocks: Array<BlockInstance>,
+  callback: (block: BlockInstance) => BlockInstance,
+): BlockInstance[] =>
   blocks.map((block) => {
     const result = callback(block);
     if (block.innerBlocks) {
-      result.innerBlocks = mapBlocks(block.innerBlocks, callback);
+      return {
+        ...result,
+        innerBlocks: mapBlocks(block.innerBlocks, callback),
+      };
     }
     return result;
   });
 
 export const controls = {
-  SAVE_FORM() {
+  async SAVE_FORM() {
     if (select('mailpoet-form-editor').getIsFormSaving()) {
       return;
     }
@@ -57,7 +67,7 @@ export const controls = {
       body: blocksToFormBody(formBlocks),
       editor_version: 2,
     };
-    MailPoet.Ajax.post({
+    await MailPoet.Ajax.post<{ data: { id: string } }>({
       api_version: window.mailpoet_api_version,
       endpoint: 'forms',
       action: 'saveEditor',
@@ -74,7 +84,7 @@ export const controls = {
       });
   },
 
-  SAVE_CUSTOM_FIELD(actionData) {
+  async SAVE_CUSTOM_FIELD(actionData) {
     dispatch('mailpoet-form-editor').saveCustomFieldStarted();
     const customFields = select(
       'mailpoet-form-editor',
@@ -84,7 +94,7 @@ export const controls = {
     );
     const requestData = {};
     merge(requestData, customField, actionData.data);
-    MailPoet.Ajax.post({
+    await MailPoet.Ajax.post<{ data: unknown }>({
       api_version: window.mailpoet_api_version,
       endpoint: 'customFields',
       action: 'save',
@@ -105,7 +115,11 @@ export const controls = {
       });
   },
 
-  CREATE_CUSTOM_FIELD(action) {
+  async CREATE_CUSTOM_FIELD(action) {
+    const {
+      clientId,
+      data,
+    }: { clientId: string; data: Record<string, unknown> } = action;
     if (select('mailpoet-form-editor').getIsCustomFieldCreating()) {
       return;
     }
@@ -114,11 +128,11 @@ export const controls = {
     if (!select('mailpoet-form-editor').getIsCustomFieldCreating()) {
       return;
     }
-    MailPoet.Ajax.post({
+    await MailPoet.Ajax.post<{ data: { type: string } }>({
       api_version: window.mailpoet_api_version,
       endpoint: 'customFields',
       action: 'save',
-      data: action.data,
+      data,
     })
       .then((response) => {
         const customField = response.data;
@@ -127,10 +141,7 @@ export const controls = {
         });
         const blockName = registerCustomFieldBlock(customField);
         const customFieldBlock = createBlock(blockName);
-        dispatch('core/block-editor').replaceBlock(
-          action.clientId,
-          customFieldBlock,
-        );
+        dispatch('core/block-editor').replaceBlock(clientId, customFieldBlock);
         dispatch('mailpoet-form-editor').createCustomFieldDone(response.data);
       })
       .fail((response) => {
@@ -140,21 +151,23 @@ export const controls = {
       });
   },
 
-  DELETE_CUSTOM_FIELD(actionData) {
+  async DELETE_CUSTOM_FIELD(actionData) {
+    const {
+      customFieldId,
+      clientId,
+    }: { customFieldId: number; clientId: string } = actionData;
     dispatch('mailpoet-form-editor').deleteCustomFieldStarted();
     const customFields = select(
       'mailpoet-form-editor',
     ).getAllAvailableCustomFields();
-    const customField = customFields.find(
-      (cf) => cf.id === actionData.customFieldId,
-    );
+    const customField = customFields.find((cf) => cf.id === customFieldId);
     const namesMap = getCustomFieldBlockSettings(customField);
-    MailPoet.Ajax.post({
+    await MailPoet.Ajax.post({
       api_version: window.mailpoet_api_version,
       endpoint: 'customFields',
       action: 'delete',
       data: {
-        id: actionData.customFieldId,
+        id: customFieldId,
       },
     })
       .then(() => {
@@ -162,10 +175,10 @@ export const controls = {
           'Field type': customField.type,
         });
         dispatch('mailpoet-form-editor').deleteCustomFieldDone(
-          actionData.customFieldId,
-          actionData.clientId,
+          customFieldId,
+          clientId,
         );
-        dispatch('core/block-editor').removeBlock(actionData.clientId);
+        dispatch('core/block-editor').removeBlock(clientId);
         unregisterBlockType(
           formatCustomFieldBlockName(
             namesMap[customField.type].name,
@@ -192,9 +205,12 @@ export const controls = {
         ].includes(block.name) ||
         block.name.startsWith('mailpoet-form/custom-text')
       ) {
-        updatedBlock.attributes = {
-          ...updatedBlock.attributes,
-          styles: actionData.styles,
+        return {
+          ...updatedBlock,
+          attributes: {
+            ...updatedBlock.attributes,
+            styles: actionData.styles,
+          },
         };
       }
       return updatedBlock;
@@ -202,8 +218,8 @@ export const controls = {
     dispatch('core/block-editor').resetBlocks(updatedBlocks);
   },
 
-  TUTORIAL_DISMISS() {
-    MailPoet.Ajax.post({
+  async TUTORIAL_DISMISS() {
+    await MailPoet.Ajax.post({
       api_version: MailPoet.apiVersion,
       endpoint: 'user_flags',
       action: 'set',
@@ -213,10 +229,10 @@ export const controls = {
 
   /**
    * We want to ensure that email input and submit are always present.
-   * @param actionData {{type: string, blocks: Object[]}} blocks property contains editor blocks
+   * @param actionData {{type: string, blocks: BlockInstance[]}} blocks property contains editor blocks
    */
   BLOCKS_CHANGED_IN_BLOCK_EDITOR(actionData) {
-    const newBlocks = actionData.blocks;
+    const newBlocks = actionData.blocks as Array<BlockInstance>;
     // Check if both required inputs are present
     const emailInput = findBlock(newBlocks, 'mailpoet-form/email-input');
     const submitInput = findBlock(newBlocks, 'mailpoet-form/submit-button');
@@ -252,17 +268,16 @@ export const controls = {
   },
 
   STORE_LOCALLY(actionData) {
-    window.localStorage.setItem(
-      actionData.key,
-      JSON.stringify(actionData.value),
-    );
+    const { key, value } = actionData as Record<string, string>;
+    window.localStorage.setItem(key, JSON.stringify(value));
   },
 
   CALL_API,
 
   ENSURE_BROWSER_URL(actionData) {
+    const { formId } = actionData as Record<string, string>;
     let url = select('mailpoet-form-editor').getFormEditorUrl();
-    url = `${url}${actionData.formId}`;
+    url = `${url}${formId}`;
     if (window.location !== url) {
       window.history.replaceState(null, '', url);
     }
