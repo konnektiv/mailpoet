@@ -7,7 +7,9 @@ use MailPoet\AutomaticEmails\AutomaticEmails;
 use MailPoet\Automation\Engine\Engine;
 use MailPoet\Automation\Engine\Hooks as AutomationHooks;
 use MailPoet\Automation\Integrations\MailPoet\MailPoetIntegration;
+use MailPoet\Cron\ActionScheduler\ActionScheduler;
 use MailPoet\Cron\CronTrigger;
+use MailPoet\Cron\DaemonActionSchedulerRunner;
 use MailPoet\Features\FeaturesController;
 use MailPoet\InvalidStateException;
 use MailPoet\PostEditorBlocks\PostEditorBlock;
@@ -102,6 +104,9 @@ class Initializer {
   /** @var FeaturesController */
   private $featuresController;
 
+  /** @var ActionScheduler */
+  private $actionScheduler;
+
   const INITIALIZED = 'MAILPOET_INITIALIZED';
 
   public function __construct(
@@ -129,7 +134,8 @@ class Initializer {
     AssetsLoader $assetsLoader,
     Engine $automationEngine,
     MailPoetIntegration $automationMailPoetIntegration,
-    FeaturesController $featuresController
+    FeaturesController $featuresController,
+    ActionScheduler $actionScheduler
   ) {
     $this->rendererFactory = $rendererFactory;
     $this->accessControl = $accessControl;
@@ -156,6 +162,7 @@ class Initializer {
     $this->automationEngine = $automationEngine;
     $this->automationMailPoetIntegration = $automationMailPoetIntegration;
     $this->featuresController = $featuresController;
+    $this->actionScheduler = $actionScheduler;
   }
 
   public function init() {
@@ -184,6 +191,15 @@ class Initializer {
       [
         $this,
         'runActivator',
+      ]
+    );
+
+    // deactivation function
+    $this->wpFunctions->registerDeactivationHook(
+      Env::$file,
+      [
+        $this,
+        'runDeactivation',
       ]
     );
 
@@ -433,6 +449,12 @@ class Initializer {
       )
     );
     return array_merge($tables, $mailpoetTables);
+  }
+
+  public function runDeactivation() {
+    // Unschedule recurring action scheduler actions
+    $this->actionScheduler->unscheduleAction(DaemonActionSchedulerRunner::DAEMON_RUN_SCHEDULER_ACTION);
+    $this->actionScheduler->unscheduleAction(DaemonActionSchedulerRunner::DAEMON_TRIGGER_SCHEDULER_ACTION);
   }
 
   private function setupWoocommerceTransactionalEmails() {
