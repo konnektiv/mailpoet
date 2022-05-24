@@ -22,6 +22,10 @@ if ((boolean)getenv('MULTISITE') === true) {
 } else {
   $wpLoadFile = getenv('WP_ROOT') . '/wp-load.php';
 }
+
+// Disable WP Cron - we don't want it to accidentally trigger action scheduler
+define('DISABLE_WP_CRON', true);
+
 require_once($wpLoadFile);
 
 $console = new \Codeception\Lib\Console\Output([]);
