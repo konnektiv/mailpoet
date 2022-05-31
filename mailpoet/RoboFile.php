@@ -925,9 +925,9 @@ class RoboFile extends \Robo\Tasks {
     $this->say("IMPORTANT NOTES \n" . ($outputs[2] ?: 'none'));
   }
 
-  public function releaseDownloadZip() {
+  public function releaseDownloadZip($branch = \MailPoetTasks\Release\CircleCiController::RELEASE_BRANCH) {
     $circleciController = $this->createCircleCiController();
-    $path = $circleciController->downloadLatestBuild(self::ZIP_BUILD_PATH);
+    $path = $circleciController->downloadLatestBuild(self::ZIP_BUILD_PATH, $branch);
     $this->say('Release ZIP downloaded to: ' . $path);
     $this->say(sprintf('Release ZIP file size: %.2F MB', filesize($path) / pow(1024, 2)));
   }

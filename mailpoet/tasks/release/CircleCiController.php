@@ -46,9 +46,9 @@ class CircleCiController {
     $this->githubController = $githubController;
   }
 
-  public function downloadLatestBuild($targetPath) {
-    $job = $this->getLatestZipBuildJob();
-    $this->checkZipBuildJob($job);
+  public function downloadLatestBuild(string $targetPath, string $branch): string {
+    $job = $this->getLatestZipBuildJob($branch);
+    $this->checkZipBuildJob($job, $branch);
     $releaseZipUrl = $this->getReleaseZipUrl($job['build_num']);
 
     $this->httpClient->get($releaseZipUrl, [
@@ -60,8 +60,8 @@ class CircleCiController {
     return $targetPath;
   }
 
-  private function getLatestZipBuildJob() {
-    $response = $this->httpClient->get('tree/' . urlencode(self::RELEASE_BRANCH));
+  private function getLatestZipBuildJob(string $branch) {
+    $response = $this->httpClient->get('tree/' . urlencode($branch));
     $jobs = json_decode($response->getBody()->getContents(), true);
 
     foreach ($jobs as $job) {
@@ -72,7 +72,7 @@ class CircleCiController {
     throw new \Exception('No release ZIP build found');
   }
 
-  private function checkZipBuildJob(array $job) {
+  private function checkZipBuildJob(array $job, string $branch) {
     if ($job['status'] !== self::JOB_STATUS_SUCCESS) {
       $expectedStatus = self::JOB_STATUS_SUCCESS;
       throw new \Exception("Job has invalid status '$job[status]', '$expectedStatus' expected");
@@ -83,7 +83,7 @@ class CircleCiController {
     }
 
     // ensure we're downloading latest revision on given branch
-    $revision = $this->githubController->getLatestCommitRevisionOnBranch(self::RELEASE_BRANCH);
+    $revision = $this->githubController->getLatestCommitRevisionOnBranch($branch);
     if ($revision === null || $job['vcs_revision'] !== $revision) {
       throw new \Exception(
         "Found ZIP was built from revision '$revision' but the latest one is '$job[vcs_revision]'"
